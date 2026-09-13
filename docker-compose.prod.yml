@@ -1,0 +1,68 @@
+services:
+  mongo:
+    image: mongo:7.0
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - mongo-data-prod:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  mongo-init:
+    image: mongo:7.0
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      mongosh --host mongo:27017 --eval '
+        try { rs.status(); print("Replica set rs0 already initialized"); }
+        catch (e) { rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "mongo:27017" }] }); print("Replica set rs0 initialized"); }
+      '
+
+  backend:
+    build:
+      context: ./backend
+      target: production
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      MONGO_URI: mongodb://mongo:27017/campus-events?replicaSet=rs0
+      CORS_ORIGIN: http://localhost:8080
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in your .env file - see .env.example}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-2h}
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+      args:
+        VITE_API_URL: http://localhost:4000/api
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mongo-data-prod:

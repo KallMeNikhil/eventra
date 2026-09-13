@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log*
+coverage
+.env
+.env.*
+!.env.example
+tests
+jest.config.js
+.git
+.gitignore
+*.md
+.DS_Store
